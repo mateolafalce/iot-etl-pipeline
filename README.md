@@ -1,6 +1,10 @@
+<div align="center">
+
 # IoT ETL Pipeline
 
 End-to-end IoT data pipeline: simulated sensors → MQTT → PostgreSQL → Airflow ETL → analytical tables.
+
+</div>
 
 ## Architecture
 
