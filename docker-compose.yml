@@ -1,0 +1,161 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: iot_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iot_net
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: iot_mosquitto
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+    ports:
+      - "1883:1883"
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h localhost -p 1883 -t health/check -m ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iot_net
+
+  airflow-init:
+    image: apache/airflow:2.8.1
+    container_name: iot_airflow_init
+    env_file:
+      - .env
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://iot_user:iot_pass@postgres:5432/iot_db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - _PIP_ADDITIONAL_REQUIREMENTS=polars psycopg2-binary numpy
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db init && \
+        airflow users create \
+          --username ${AIRFLOW_ADMIN_USER} \
+          --password ${AIRFLOW_ADMIN_PASSWORD} \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@iot-pipeline.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./dags:/opt/airflow/dags
+    restart: "no"
+    networks:
+      - iot_net
+
+  airflow-webserver:
+    image: apache/airflow:2.8.1
+    container_name: iot_airflow_webserver
+    env_file:
+      - .env
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://iot_user:iot_pass@postgres:5432/iot_db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - _PIP_ADDITIONAL_REQUIREMENTS=polars psycopg2-binary numpy
+    command: webserver
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - iot_net
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.1
+    container_name: iot_airflow_scheduler
+    env_file:
+      - .env
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://iot_user:iot_pass@postgres:5432/iot_db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - _PIP_ADDITIONAL_REQUIREMENTS=polars psycopg2-binary numpy
+    command: scheduler
+    volumes:
+      - ./dags:/opt/airflow/dags
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - iot_net
+
+  mqtt-consumer:
+    build:
+      context: ./ingestor
+      dockerfile: Dockerfile
+    container_name: iot_mqtt_consumer
+    env_file:
+      - .env
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - iot_net
+
+  sensor-simulator:
+    build:
+      context: ./sensors
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+        WORKDIR /app
+        COPY pyproject.toml .
+        COPY simulator.py .
+        RUN uv sync --no-dev
+        CMD ["uv", "run", "python", "simulator.py"]
+    container_name: iot_sensor_simulator
+    env_file:
+      - .env
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - iot_net
+
+volumes:
+  postgres_data:
+  mosquitto_data:
+
+networks:
+  iot_net:
+    driver: bridge

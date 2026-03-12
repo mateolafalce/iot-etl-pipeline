@@ -1,0 +1,10 @@
+[project]
+name = "iot-etl-pipeline"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = ["sensors", "ingestor", "tests"]
+
+[tool.uv.sources]
+# workspace packages reference each other if needed
