@@ -68,18 +68,4 @@ Airflow UI: http://localhost:8080 (admin / admin)
 5. **Load** – batch inserts into `sensor_readings` and `anomalies`
 6. **Mark Processed** – sets `processed=TRUE` on raw_events rows
 
-## Running Tests
 
-```bash
-pip install polars numpy python-dateutil pytest
-pytest tests/ -v
-```
-
-## Database Schema
-
-- `raw_events` – landing zone (JSONB payload)
-- `clean_events` – validated and normalised events
-- `sensor_metadata` – reference data (location, thresholds, baseline rates)
-- `sensor_readings` – final analytical table
-- `anomalies` – flagged anomalous events
-- `dead_letter_events` – rejected events with failure reason
