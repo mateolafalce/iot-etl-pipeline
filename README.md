@@ -4,15 +4,24 @@ End-to-end IoT data pipeline: simulated sensors → MQTT → PostgreSQL → Airf
 
 ## Architecture
 
-```
-[Sensor Simulator] → MQTT (Mosquitto) → [MQTT Consumer] → raw_events (PostgreSQL)
-                                                                  ↓
-                                                          [Airflow DAG: */5 min]
-                                                          extract → clean → enrich
-                                                                         ↓
-                                                          anomaly detection → load
-                                                                         ↓
-                                                     sensor_readings + anomalies tables
+```mermaid
+flowchart TD
+    A[Sensor Simulator] -->|Publishes| B{MQTT: Mosquitto}
+    B -->|Subscribes| C[MQTT Consumer]
+    C -->|Inserts| D[(PostgreSQL: raw_events)]
+    
+    subgraph ETL [Airflow DAG: */5 min]
+        direction TB
+        E[Extract] --> F[Clean]
+        F --> G[Enrich]
+        G --> H[Anomaly Detection]
+        H --> I[Load]
+    end
+    
+    D --> E
+    
+    I -->|Inserts| J[(sensor_readings)]
+    I -->|Inserts| K[(anomalies)]
 ```
 
 ## Quick Start
